@@ -164,7 +164,7 @@ namespace SentinelApi
             app.UseRateLimiter();
             app.MapControllers();
 
-            // HEROKU SUPPORT: Use PORT environment variable
+            // HEROKU SUPPORT: Use PORT environment variable 
             var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
             var url = $"http://0.0.0.0:{port}";
             Console.WriteLine($"Starting API on: {url}");
