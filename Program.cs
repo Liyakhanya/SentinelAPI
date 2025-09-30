@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using SentinelApi.Services;
 using System.Threading.RateLimiting;
+using Microsoft.OpenApi.Models;
 
 namespace SentinelApi
 {
@@ -16,44 +17,76 @@ namespace SentinelApi
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            // Add services to the container
+           
             builder.Services.AddControllers();
             builder.Services.AddEndpointsApiExplorer();
-            builder.Services.AddSwaggerGen();
+            builder.Services.AddSwaggerGen(c =>
+            {
+                c.SwaggerDoc("v1", new OpenApiInfo
+                {
+                    Title = "Sentinel API",
+                    Version = "v1",
+                    Description = "Community Safety API for Sentinel App"
+                });
 
-            // Configure Firebase for both Development and Production
+                
+                c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+                {
+                    Description = "JWT Authorization header using the Bearer scheme. Example: \"Authorization: Bearer {token}\"",
+                    Name = "Authorization",
+                    In = ParameterLocation.Header,
+                    Type = SecuritySchemeType.ApiKey,
+                    Scheme = "Bearer"
+                });
+
+                c.AddSecurityRequirement(new OpenApiSecurityRequirement
+                {
+                    {
+                        new OpenApiSecurityScheme
+                        {
+                            Reference = new OpenApiReference
+                            {
+                                Type = ReferenceType.SecurityScheme,
+                                Id = "Bearer"
+                            }
+                        },
+                        new string[] {}
+                    }
+                });
+            });
+
+            
             var projectId = builder.Configuration["Firebase:ProjectId"];
             GoogleCredential credential;
 
-            // Production environment handling
+            
             if (builder.Environment.IsProduction())
             {
                 Console.WriteLine("Running in PRODUCTION environment");
 
-                // Method 1: Try environment variable for file path
+                
                 var envCredentialPath = Environment.GetEnvironmentVariable("FIREBASE_CONFIG_PATH");
                 if (!string.IsNullOrEmpty(envCredentialPath) && File.Exists(envCredentialPath))
                 {
                     credential = GoogleCredential.FromFile(envCredentialPath);
                     Console.WriteLine($"Loaded Firebase credentials from environment path: {envCredentialPath}");
                 }
-                // Method 2: Try Application Default Credentials (for Azure)
                 else if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS")))
                 {
                     credential = GoogleCredential.GetApplicationDefault();
                     Console.WriteLine("Using Application Default Credentials from GOOGLE_APPLICATION_CREDENTIALS");
                 }
-                // Method 3: Fallback to embedded or other methods
+                
                 else
                 {
-                    // For Azure, we'll set this up via Application Settings
+                    
                     credential = GoogleCredential.GetApplicationDefault();
                     Console.WriteLine("Using Application Default Credentials fallback");
                 }
             }
             else
             {
-                // Development environment - use local file
+                
                 Console.WriteLine("Running in DEVELOPMENT environment");
                 var credentialPath = builder.Configuration["Firebase:CredentialPath"];
                 var fullPath = Path.GetFullPath(credentialPath ?? "");
@@ -71,7 +104,7 @@ namespace SentinelApi
                 }
             }
 
-            // Initialize Firebase
+            
             try
             {
                 var firebaseApp = FirebaseApp.Create(new AppOptions()
@@ -84,26 +117,26 @@ namespace SentinelApi
             catch (Exception ex)
             {
                 Console.WriteLine($"Firebase initialization warning: {ex.Message}");
-                // Continue - Firebase might initialize later
+                
             }
 
-            // Use FirestoreDbBuilder to create FirestoreDb
+           
             var firestoreDb = new FirestoreDbBuilder
             {
                 ProjectId = projectId,
                 Credential = credential
             }.Build();
 
-            // Register Firebase services
+            
             builder.Services.AddSingleton(firestoreDb);
             builder.Services.AddSingleton(FirebaseAuth.DefaultInstance);
 
-            // Register custom services
+           
             builder.Services.AddScoped<IFirebaseService, FirebaseService>();
             builder.Services.AddScoped<IFCMService, FCMService>();
             builder.Services.AddScoped<IValidationService, ValidationService>();
 
-            // Configure JWT authentication
+           
             builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 .AddJwtBearer(options =>
                 {
@@ -120,7 +153,7 @@ namespace SentinelApi
 
             builder.Services.AddAuthorization();
 
-            // Add rate limiting middleware from config
+           
             builder.Services.AddRateLimiter(options =>
             {
                 options.GlobalLimiter = PartitionedRateLimiter.Create<Microsoft.AspNetCore.Http.HttpContext, string>(httpContext =>
@@ -133,7 +166,7 @@ namespace SentinelApi
                         }));
             });
 
-            // Add CORS - More restrictive for production
+            
             builder.Services.AddCors(options =>
             {
                 options.AddPolicy("AllowAll", policy =>
@@ -143,7 +176,7 @@ namespace SentinelApi
                           .AllowAnyHeader();
                 });
 
-                // Production CORS policy (uncomment for production)
+                
                 // options.AddPolicy("Production", policy =>
                 // {
                 //     policy.WithOrigins("https://yourapp.com")
@@ -161,13 +194,25 @@ namespace SentinelApi
             if (app.Environment.IsDevelopment())
             {
                 app.UseSwagger();
-                app.UseSwaggerUI();
+                app.UseSwaggerUI(c =>
+                {
+                    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Sentinel API v1");
+                    c.RoutePrefix = "swagger";
+                });
                 app.UseCors("AllowAll");
             }
             else
             {
-                app.UseCors("AllowAll"); // Use "Production" policy when ready
+                app.UseCors("AllowAll"); 
                 app.UseHttpsRedirection();
+
+                
+                app.UseSwagger();
+                app.UseSwaggerUI(c =>
+                {
+                    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Sentinel API v1");
+                    c.RoutePrefix = "swagger";
+                });
             }
 
             app.UseAuthentication();
