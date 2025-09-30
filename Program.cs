@@ -28,29 +28,27 @@ namespace SentinelApi
             // Production environment handling
             if (builder.Environment.IsProduction())
             {
-                Console.WriteLine("Running in PRODUCTION environment (Heroku)");
+                Console.WriteLine("Running in PRODUCTION environment");
 
-                // For Heroku, use Application Default Credentials
-                try
+                // Method 1: Try environment variable for file path
+                var envCredentialPath = Environment.GetEnvironmentVariable("FIREBASE_CONFIG_PATH");
+                if (!string.IsNullOrEmpty(envCredentialPath) && File.Exists(envCredentialPath))
+                {
+                    credential = GoogleCredential.FromFile(envCredentialPath);
+                    Console.WriteLine($"Loaded Firebase credentials from environment path: {envCredentialPath}");
+                }
+                // Method 2: Try Application Default Credentials (for Azure)
+                else if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS")))
                 {
                     credential = GoogleCredential.GetApplicationDefault();
-                    Console.WriteLine("Using Application Default Credentials for Heroku");
+                    Console.WriteLine("Using Application Default Credentials from GOOGLE_APPLICATION_CREDENTIALS");
                 }
-                catch (Exception ex)
+                // Method 3: Fallback to embedded or other methods
+                else
                 {
-                    Console.WriteLine($"ADC failed: {ex.Message}. Trying file-based...");
-
-                    // Fallback to file if exists
-                    var filePath = "sentinel-c2ba1-firebase-adminsdk-fbsvc-4ba80c21c1.json";
-                    if (File.Exists(filePath))
-                    {
-                        credential = GoogleCredential.FromFile(filePath);
-                        Console.WriteLine("Using file-based credentials");
-                    }
-                    else
-                    {
-                        throw new InvalidOperationException("No Firebase credentials found for production");
-                    }
+                    // For Azure, we'll set this up via Application Settings
+                    credential = GoogleCredential.GetApplicationDefault();
+                    Console.WriteLine("Using Application Default Credentials fallback");
                 }
             }
             else
@@ -135,7 +133,7 @@ namespace SentinelApi
                         }));
             });
 
-            // Add CORS
+            // Add CORS - More restrictive for production
             builder.Services.AddCors(options =>
             {
                 options.AddPolicy("AllowAll", policy =>
@@ -144,6 +142,14 @@ namespace SentinelApi
                           .AllowAnyMethod()
                           .AllowAnyHeader();
                 });
+
+                // Production CORS policy (uncomment for production)
+                // options.AddPolicy("Production", policy =>
+                // {
+                //     policy.WithOrigins("https://yourapp.com")
+                //           .AllowAnyMethod()
+                //           .AllowAnyHeader();
+                // });
             });
 
             // Add logging
@@ -156,19 +162,20 @@ namespace SentinelApi
             {
                 app.UseSwagger();
                 app.UseSwaggerUI();
+                app.UseCors("AllowAll");
+            }
+            else
+            {
+                app.UseCors("AllowAll"); // Use "Production" policy when ready
+                app.UseHttpsRedirection();
             }
 
-            app.UseCors("AllowAll");
             app.UseAuthentication();
             app.UseAuthorization();
             app.UseRateLimiter();
             app.MapControllers();
 
-            // HEROKU SUPPORT: Use PORT environment variable 
-            var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
-            var url = $"http://0.0.0.0:{port}";
-            Console.WriteLine($"Starting API on: {url}");
-            app.Run(url);
+            app.Run();
         }
     }
 }
