@@ -96,7 +96,7 @@ namespace SentinelApi.Controllers
                 }
                 await _fcmService.SendNotificationToUsersAsync(
                     fcmTokens,
-                    $"🚨 SOS Alert from {user.Email}",
+                    $" SOS Alert from {user.Email}",
                     $"{alert.Message}{locationText}",
                     data);
                 _logger.LogInformation("Panic FCM notifications sent to {Count} contacts for user {UserId}", fcmTokens.Count, user.UserId);
