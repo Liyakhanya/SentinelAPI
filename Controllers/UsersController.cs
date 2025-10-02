@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SentinelApi.Models;
 using SentinelApi.Services;
+
 namespace SentinelApi.Controllers
 {
     [ApiController]
@@ -12,12 +13,90 @@ namespace SentinelApi.Controllers
         private readonly IFirebaseService _firebaseService;
         private readonly IValidationService _validationService;
         private readonly ILogger<UsersController> _logger;
+
         public UsersController(IFirebaseService firebaseService, IValidationService validationService, ILogger<UsersController> logger)
         {
             _firebaseService = firebaseService;
             _validationService = validationService;
             _logger = logger;
         }
+
+        [HttpPost("login")]
+        public async Task<IActionResult> Login([FromBody] LoginRequest request)
+        {
+            try
+            {
+                _logger.LogInformation("Login attempt for email: {Email}", request.Email);
+
+                // Validate inputs
+                if (string.IsNullOrEmpty(request.Email) || !IsValidEmail(request.Email))
+                {
+                    return Error("Valid email address is required");
+                }
+
+                if (string.IsNullOrEmpty(request.Password))
+                {
+                    return Error("Password is required");
+                }
+
+                // Verify user exists in Firebase Auth and get their data
+                UserRecord userRecord;
+                try
+                {
+                    userRecord = await FirebaseAuth.DefaultInstance.GetUserByEmailAsync(request.Email);
+                }
+                catch (FirebaseAuthException ex) when (ex.AuthErrorCode == FirebaseAdmin.Auth.AuthErrorCode.UserNotFound)
+                {
+                    return Error("Invalid email or password", 401);
+                }
+                catch (FirebaseAuthException ex)
+                {
+                    _logger.LogError(ex, "Firebase auth error during login");
+                    return Error("Authentication failed: " + ex.Message, 401);
+                }
+
+                // Get user data from Firestore
+                var user = await _firebaseService.GetUserAsync(userRecord.Uid);
+                if (user == null)
+                {
+                    return Error("User profile not found", 404);
+                }
+
+                // Update FCM token if provided
+                if (!string.IsNullOrEmpty(request.FCMToken))
+                {
+                    var updates = new Dictionary<string, object>
+                    {
+                        { "FCMToken", request.FCMToken },
+                        { "UpdatedAt", DateTime.UtcNow }
+                    };
+                    await _firebaseService.UpdateUserAsync(user.UserId, updates);
+                }
+
+                _logger.LogInformation("User logged in successfully: {UserId}", user.UserId);
+
+                return Success(new
+                {
+                    user = new
+                    {
+                        user.UserId,
+                        user.Email,
+                        user.Suburb,
+                        user.NotificationCategories,
+                        user.DarkMode,
+                        user.AnonymousMode,
+                        user.LocationSharingDuration,
+                        user.CreatedAt
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during user login");
+                return Error("Internal server error", 500);
+            }
+        }
+
         [HttpPost("register")]
         public async Task<IActionResult> Register([FromBody] RegisterRequest request)
         {
@@ -103,6 +182,7 @@ namespace SentinelApi.Controllers
                 return Error("Internal server error", 500);
             }
         }
+
         [Authorize]
         [HttpPost("settings")]
         public async Task<IActionResult> UpdateSettings([FromBody] SettingsRequest request)
@@ -194,6 +274,7 @@ namespace SentinelApi.Controllers
                 return Error("Internal server error", 500);
             }
         }
+
         [Authorize]
         [HttpGet("profile")]
         public async Task<IActionResult> GetProfile()
@@ -230,6 +311,7 @@ namespace SentinelApi.Controllers
                 return Error("Internal server error", 500);
             }
         }
+
         [Authorize]
         [HttpGet("suburbs")]
         public IActionResult GetPESuburbs()
@@ -237,6 +319,7 @@ namespace SentinelApi.Controllers
             var suburbs = _validationService.GetPESuburbs();
             return Success(new { suburbs, count = suburbs.Count });
         }
+
         [Authorize]
         [HttpGet("categories")]
         public IActionResult GetCategories()
@@ -244,13 +327,14 @@ namespace SentinelApi.Controllers
             var categories = _validationService.GetValidCategories();
             return Success(new { categories, count = categories.Count });
         }
+
         private bool IsValidEmail(string email)
         {
             if (string.IsNullOrWhiteSpace(email)) return false;
             try
             {
                 var addr = new System.Net.Mail.MailAddress(email);
-                return addr.Address == email && email.Contains('@') && email.Contains('.'); 
+                return addr.Address == email && email.Contains('@') && email.Contains('.');
             }
             catch
             {
